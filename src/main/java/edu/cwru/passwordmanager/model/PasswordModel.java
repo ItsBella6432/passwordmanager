@@ -14,7 +14,11 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
-
+/**
+ * The class that represents the Password book.
+ *
+ * @author isabellacraun
+ */
 public class PasswordModel {
     private ObservableList<Password> passwords = FXCollections.observableArrayList();
 
@@ -30,6 +34,16 @@ public class PasswordModel {
     // TODO: You can set this to whatever you like to verify that the password the user entered is correct
     private static String verifyString = "cookies";
 
+    /**
+     * A method to load saved passwords from {@link #passwordFile} into {@link #passwords}.
+     *
+     * <p>Skips first line with salt and verification token. Decrypts passwords after that
+     * with current {@link #passwordFileKey}.
+     * That key must be set prior with call to {@link #verifyPassword(String)} or
+     * {@link #initializePasswordFile(String)}.
+     *
+     * @throws RuntimeException if cannot read file or decrypt password
+     */
     private void loadPasswords() {
         // TODO: Replace with loading passwords from file, you will want to add them to the passwords list defined above
         // TODO: Tips: Use buffered reader, make sure you split on separator, make sure you decrypt password
@@ -39,6 +53,7 @@ public class PasswordModel {
             reader.readLine();
 
             String line;
+            // loop should skip extraneous lines
             while ((line = reader.readLine()) != null) {
                 String [] parts = line.split(separator);
                 if (parts.length < 2) {
@@ -54,14 +69,35 @@ public class PasswordModel {
         }
     }
 
+    /**
+     * A method to create a model and load existing passwords.
+     *
+     * <p>Assumes the password file's key has been set up prior with
+     * {@link #verifyPassword(String)} or {@link #initializePasswordFile(String)}.
+     */
     public PasswordModel() {
         loadPasswords();
     }
 
+    /**
+     * A method to check is password book file exists on disk.
+     *
+     * @return {@code true} if {@link #passwordFile} exists
+     *         {@code false} otherwise
+     */
     static public boolean passwordFileExists() {
         return passwordFile.exists();
     }
 
+    /**
+     * A method to create a new password book file protected with input password.
+     *
+     * <p>Will generate a random salt to derive an encryption key with password.
+     * Writes the salt and verification token to the file.
+     *
+     * @param password the password protecting access to the file
+     * @throws IOException the file cannot be created or written to
+     */
     static public void initializePasswordFile(String password) throws IOException {
         passwordFile.createNewFile();
 
@@ -72,12 +108,24 @@ public class PasswordModel {
             passwordFileSalt = generateSalt();
             passwordFileKey = generateKey(password,passwordFileSalt);
 
+            // writes the salt and v token
             writeFile(new ArrayList<>());
         } catch (GeneralSecurityException e) {
             throw new RuntimeException(e);
         }
     }
 
+    /**
+     * A method to check if the input password unlocks the password file.
+     *
+     * <p>Will read the salt and verification token from first line of file,
+     * derive a key from password, and attempt to decrypt token. If succeeds,
+     * will store the derived key.
+     *
+     * @param password the password user entered
+     * @return {@code true} if token decrypts and matches string
+     *         {@code false} if password or file is wrong
+     */
     static public boolean verifyPassword(String password) {
         passwordFilePassword = password; // DO NOT CHANGE
 
@@ -93,6 +141,7 @@ public class PasswordModel {
             passwordFileSalt = Base64.getDecoder().decode(parts[0]);
             passwordFileKey = generateKey(password, passwordFileSalt);
 
+            // prevent edge case of bad key slipping through exception
             return decrypt(parts[1]).equals(verifyString);
         } catch (Exception e) {
             // wrong password or file
@@ -100,10 +149,22 @@ public class PasswordModel {
         }
     }
 
+    /**
+     * A method to return the current list of passwords in memory.
+     *
+     * <p>Same list backing UI, so add and remove is reflected on screen.
+     *
+     * @return the list of saved passwords
+     */
     public ObservableList<Password> getPasswords() {
         return passwords;
     }
 
+    /**
+     * A method to remove the password at the given index and update file on disk.
+     *
+     * @param index of the password to remove, seen in {@link #passwords}
+     */
     public void deletePassword(int index) {
         passwords.remove(index);
 
@@ -111,6 +172,12 @@ public class PasswordModel {
         saveFile();
     }
 
+    /**
+     * A method to replace the password at the given index and update file on disk.
+     *
+     * @param password the new label/password to store at {@code index}
+     * @param index of the password to replace, seen in {@link #passwords}
+     */
     public void updatePassword(Password password, int index) {
         passwords.set(index, password);
 
@@ -118,6 +185,11 @@ public class PasswordModel {
         saveFile();
     }
 
+    /**
+     * A method to add new password to end of list and update file on disk.
+     *
+     * @param password the new label/password to add
+     */
     public void addPassword(Password password) {
         passwords.add(password);
 
@@ -128,6 +200,11 @@ public class PasswordModel {
     // TODO: Tip: Break down each piece into individual methods, for example: generateSalt(), encryptPassword, generateKey(), saveFile, etc ...
     // TODO: Use these functions above, and it will make it easier! Once you know encryption, decryption, etc works, you just need to tie them in
 
+    /**
+     * A helper method to generate a new random 16 byte salt.
+     *
+     * @return the salt, suitable for {@link #generateKey(String, byte[])}.
+     */
     static private byte [] generateSalt() {
         SecureRandom random = new SecureRandom();
         byte [] salt = new byte[16];
@@ -135,12 +212,27 @@ public class PasswordModel {
         return salt;
     }
 
+    /**
+     * A helper method to create 128 bit AES key from password and salt using PBKDF2.
+     *
+     * @param password to derive the key from
+     * @param salt to combine with password
+     * @return the created key, as raw bytes suitable for {@link SecretKeySpec}
+     * @throws GeneralSecurityException derivation algorithm unavailable
+     */
     static private byte [] generateKey(String password,byte [] salt) throws GeneralSecurityException {
         KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 600000, 128);
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
         return factory.generateSecret(spec).getEncoded();
     }
 
+    /**
+     * A helper method to encrypt message using {@link #passwordFileKey}.
+     *
+     * @param message to encrypt
+     * @return encrypted message, encoded as Base64 to be stored as text
+     * @throws GeneralSecurityException cipher cannot run
+     */
     static private String encrypt(String message) throws GeneralSecurityException {
         Cipher cipher = Cipher.getInstance("AES");
         SecretKeySpec key = new SecretKeySpec(passwordFileKey, "AES");
@@ -150,6 +242,13 @@ public class PasswordModel {
         return Base64.getEncoder().encodeToString(encryptedData);
     }
 
+    /**
+     * A helper method to decrypt message using {@link #passwordFileKey}.
+     *
+     * @param message encrypted, encoded as Base64
+     * @return decrypted plaintext message
+     * @throws GeneralSecurityException cipher cannot initialize or decrypt fails
+     */
     static private String decrypt(String message) throws GeneralSecurityException {
         Cipher cipher = Cipher.getInstance("AES");
         SecretKeySpec key = new SecretKeySpec(passwordFileKey, "AES");
@@ -160,6 +259,16 @@ public class PasswordModel {
         return new String(decryptedData);
     }
 
+    /**
+     * A helper method to rewrite password file from scratch.
+     *
+     * <p>Will write salt and verification token on first line, then one line
+     * for each password with its label and encrypted password.
+     *
+     * @param passwords to write, in order
+     * @throws IOException cannot write to file
+     * @throws GeneralSecurityException cannot encrypt password
+     */
     static private void writeFile(List<Password> passwords) throws IOException, GeneralSecurityException {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(passwordFile))) {
             String saltString = Base64.getEncoder().encodeToString(passwordFileSalt);
@@ -173,6 +282,15 @@ public class PasswordModel {
         }
     }
 
+    /**
+     * A helper method to save {@link #passwords} list in memory to disk.
+     *
+     * <p>Thin wrapper around {@link #writeFile(List)} to simplify
+     * {@link #addPassword}, {@link #updatePassword}, and {@link #deletePassword}
+     * from individual checked exception handling.
+     *
+     * @throws RuntimeException cannot write to file
+     */
     private void saveFile() {
         try {
             writeFile(passwords);
